@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"strings"
 
 	"github.com/micromdm/nanomdm/certverify"
 	"github.com/micromdm/nanomdm/cmd/cli"
@@ -23,6 +24,9 @@ import (
 	"github.com/micromdm/nanomdm/service/microwebhook"
 	"github.com/micromdm/nanomdm/service/multi"
 	"github.com/micromdm/nanomdm/service/nanomdm"
+
+	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/awslabs/aws-lambda-go-api-proxy/httpadapter"	
 )
 
 // overridden by -ldflags -X
@@ -58,7 +62,15 @@ func main() {
 		flMigration  = flag.Bool("migration", false, "HTTP endpoint for enrollment migrations")
 		flRetro      = flag.Bool("retro", false, "Allow retroactive certificate-authorization association")
 		flDMURLPfx   = flag.String("dm", "", "URL to send Declarative Management requests to")
+		flLambda     = flag.Bool("lambda", false, "Run using a lambda")
 	)
+
+	// doing this before flag.Parse() to allow CLI flags to take precedence
+	err := SetFlagsFromEnvironment()
+	if err != nil {
+		stdlog.Fatal(err)
+	}
+
 	flag.Parse()
 
 	if *flVersion {
@@ -193,15 +205,23 @@ func main() {
 
 	mux.HandleFunc(endpointAPIVersion, mdmhttp.VersionHandler(version))
 
+	muxWithTraceLogging := mdmhttp.TraceLoggingMiddleware(mux, logger.With("handler", "log"), newTraceID)
+
 	rand.Seed(time.Now().UnixNano())
 
-	logger.Info("msg", "starting server", "listen", *flListen)
-	err = http.ListenAndServe(*flListen, mdmhttp.TraceLoggingMiddleware(mux, logger.With("handler", "log"), newTraceID))
-	logs := []interface{}{"msg", "server shutdown"}
-	if err != nil {
-		logs = append(logs, "err", err)
+	if *flLambda {
+		// Proxies requests from the AWS API Gateway to go's http handlers
+		// https://github.com/awslabs/aws-lambda-go-api-proxy
+		lambda.Start(httpadapter.New(muxWithTraceLogging).ProxyWithContext);
+	} else {
+		logger.Info("msg", "starting server", "listen", *flListen)
+		err = http.ListenAndServe(*flListen, muxWithTraceLogging)
+		logs := []interface{}{"msg", "server shutdown"}
+		if err != nil {
+			logs = append(logs, "err", err)
+		}
+		logger.Info(logs...)	
 	}
-	logger.Info(logs...)
 }
 
 // newTraceID generates a new HTTP trace ID for context logging.
@@ -212,4 +232,24 @@ func newTraceID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return fmt.Sprintf("%x", b)
+}
+
+// In order to make nanomdm work within various contexts, we should allow configuration
+// to be passed in via environment variables. See https://12factor.net/config.
+// There are LOTS of flag parsing libraries that support doing this, but to avoid additional
+// layers of abstraction let's just parse ENV variables using the built-in flag library.
+//
+// Hat tip: https://utz.us/posts/go-flags-from-environment/
+func SetFlagsFromEnvironment() (err error) {
+	flag.VisitAll(func(f *flag.Flag) {
+		name := strings.ToUpper(strings.Replace(f.Name, "-", "_", -1))
+		if value, ok := os.LookupEnv(name); ok {
+			err2 := flag.Set(f.Name, value)
+			if err2 != nil {
+				err = fmt.Errorf("failed setting flag from environment: %w", err2)
+			}
+		}
+	})
+
+	return
 }
