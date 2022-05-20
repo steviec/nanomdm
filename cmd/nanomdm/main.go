@@ -9,8 +9,8 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"time"
 	"strings"
+	"time"
 
 	"github.com/micromdm/nanomdm/certverify"
 	"github.com/micromdm/nanomdm/cmd/cli"
@@ -26,7 +26,7 @@ import (
 	"github.com/micromdm/nanomdm/service/nanomdm"
 
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/awslabs/aws-lambda-go-api-proxy/httpadapter"	
+	"github.com/awslabs/aws-lambda-go-api-proxy/httpadapter"
 )
 
 // overridden by -ldflags -X
@@ -53,6 +53,7 @@ func main() {
 		flAPIKey     = flag.String("api", "", "API key for API endpoints")
 		flVersion    = flag.Bool("version", false, "print version")
 		flRootsPath  = flag.String("ca", "", "path to CA cert for verification")
+		flInlineCert = flag.String("inline-cert", "", "path to CA cert for verification")
 		flWebhook    = flag.String("webhook-url", "", "URL to send requests to")
 		flCertHeader = flag.String("cert-header", "", "HTTP header containing URL-escaped TLS client certificate")
 		flDebug      = flag.Bool("debug", false, "log debug messages")
@@ -65,8 +66,10 @@ func main() {
 		flLambda     = flag.Bool("lambda", false, "Run using a lambda")
 	)
 
+	var err error
+
 	// doing this before flag.Parse() to allow CLI flags to take precedence
-	err := SetFlagsFromEnvironment()
+	err = SetFlagsFromEnvironment("MDM")
 	if err != nil {
 		stdlog.Fatal(err)
 	}
@@ -84,10 +87,17 @@ func main() {
 
 	logger := stdlogfmt.New(stdlog.Default(), *flDebug)
 
-	if *flRootsPath == "" {
-		stdlog.Fatal("must supply CA cert path flag")
+	if *flRootsPath == "" && *flInlineCert == "" {
+		stdlog.Fatal("must supply CA cert path flag or provide the CA cert inline")
 	}
-	caPEM, err := ioutil.ReadFile(*flRootsPath)
+
+	var caPEM []byte
+	if *flRootsPath != "" {
+		caPEM, err = ioutil.ReadFile(*flRootsPath)
+	} else {
+		caPEM = []byte(*flInlineCert)
+	}
+
 	if err != nil {
 		stdlog.Fatal(err)
 	}
@@ -212,7 +222,7 @@ func main() {
 	if *flLambda {
 		// Proxies requests from the AWS API Gateway to go's http handlers
 		// https://github.com/awslabs/aws-lambda-go-api-proxy
-		lambda.Start(httpadapter.New(muxWithTraceLogging).ProxyWithContext);
+		lambda.Start(httpadapter.New(muxWithTraceLogging).ProxyWithContext)
 	} else {
 		logger.Info("msg", "starting server", "listen", *flListen)
 		err = http.ListenAndServe(*flListen, muxWithTraceLogging)
@@ -220,7 +230,7 @@ func main() {
 		if err != nil {
 			logs = append(logs, "err", err)
 		}
-		logger.Info(logs...)	
+		logger.Info(logs...)
 	}
 }
 
@@ -240,9 +250,9 @@ func newTraceID() string {
 // layers of abstraction let's just parse ENV variables using the built-in flag library.
 //
 // Hat tip: https://utz.us/posts/go-flags-from-environment/
-func SetFlagsFromEnvironment() (err error) {
+func SetFlagsFromEnvironment(prefix string) (err error) {
 	flag.VisitAll(func(f *flag.Flag) {
-		name := strings.ToUpper(strings.Replace(f.Name, "-", "_", -1))
+		name := prefix + "_" + strings.ToUpper(strings.Replace(f.Name, "-", "_", -1))
 		if value, ok := os.LookupEnv(name); ok {
 			err2 := flag.Set(f.Name, value)
 			if err2 != nil {
