@@ -222,7 +222,7 @@ func main() {
 	if *flLambda {
 		// Proxies requests from the AWS API Gateway to go's http handlers
 		// https://github.com/awslabs/aws-lambda-go-api-proxy
-		lambda.Start(httpadapter.New(muxWithTraceLogging).ProxyWithContext)
+		lambda.Start(httpadapter.NewV2(muxWithTraceLogging).ProxyWithContext)
 	} else {
 		logger.Info("msg", "starting server", "listen", *flListen)
 		err = http.ListenAndServe(*flListen, muxWithTraceLogging)
