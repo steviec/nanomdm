@@ -67,7 +67,7 @@ func (s *MySQLStorage) StoreCommandReport(r *mdm.Request, result *mdm.CommandRes
 INSERT INTO command_results
     (id, command_uuid, status, result, not_now_at, not_now_tally)
 VALUES
-    (?, ?, ?, ?, `+notNowConstants+`) AS new
+    (?, ?, ?, ?, `+notNowConstants+`)
 ON DUPLICATE KEY
 UPDATE
     status = ?,
@@ -77,7 +77,7 @@ UPDATE
 		result.Status,
 		result.Raw,
 		result.Status,
-		result.Raw
+		result.Raw,
 	)
 	return err
 }
