@@ -70,12 +70,14 @@ VALUES
     (?, ?, ?, ?, `+notNowConstants+`) AS new
 ON DUPLICATE KEY
 UPDATE
-    status = new.status,
-    result = new.result`+notNowBumpTallySQL+`;`,
+    status = ?,
+    result = ?`+notNowBumpTallySQL+`;`,
 		r.ID,
 		result.CommandUUID,
 		result.Status,
 		result.Raw,
+		result.Status,
+		result.Raw
 	)
 	return err
 }
